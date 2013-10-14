@@ -42,7 +42,7 @@ public class PluginManagerImplTest {
     // <editor-fold defaultstate="collapsed" desc="Constants">
 
     private static String TEST_PROPERTIES_PATH = "test-plugin-manager.properties";
-    private static String TEST_PLUGINS_PATH = "/Users/davidescalante/dev/Practica/test-jars";
+    private static String TEST_PLUGINS_PATH = "src/test/resources/plugins";
     private static String TEST_CONTEXT_TYPE = "test";
 
     // </editor-fold>
