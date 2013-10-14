@@ -18,13 +18,19 @@ package org.craftercms.plugin.impl;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
+import org.craftercms.context.ContextTest;
+import org.craftercms.plugin.Context;
 import org.craftercms.plugin.PluginManager;
 import org.craftercms.plugin.impl.PluginManagerImpl;
-import org.craftercms.plugin.service.impl.PluginStatusServiceImpl;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Test;
 
 import static org.junit.Assert.fail;
 
@@ -36,6 +42,8 @@ public class PluginManagerImplTest {
     // <editor-fold defaultstate="collapsed" desc="Constants">
 
     private static String TEST_PROPERTIES_PATH = "test-plugin-manager.properties";
+    private static String TEST_PLUGINS_PATH = "/Users/davidescalante/dev/Practica/test-jars";
+    private static String TEST_CONTEXT_TYPE = "test";
 
     // </editor-fold>
 
@@ -56,7 +64,13 @@ public class PluginManagerImplTest {
 
     // <editor-fold defaultstate="collapsed" desc="Tests">
 
+    @Test
     public void testInit() throws Exception {
+        List<String> pluginFolders = new ArrayList<>();
+        Map<String, Context> contextMap = new HashMap<>();
+        contextMap.put(TEST_CONTEXT_TYPE, new ContextTest());
+        pluginFolders.add(TEST_PLUGINS_PATH);
+        pluginManager.init(pluginFolders, contextMap);
 
     }
 

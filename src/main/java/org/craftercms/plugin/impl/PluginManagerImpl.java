@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,11 +15,13 @@ import java.util.jar.Attributes;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
+
 import static java.nio.file.StandardCopyOption.*;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
+import javax.xml.bind.PropertyException;
 import javax.xml.bind.Unmarshaller;
 
 import org.craftercms.plugin.Context;
@@ -42,6 +45,9 @@ public final class PluginManagerImpl implements PluginManager {
 
     private static final String TEMP_FILE_SUFFIX = "tmp";
 
+    //Properties keys
+    private static final String PLUGIN_XML_PATH_KEY = "plugin.xml.file";
+
     // </editor-fold>
 
     // <editor-fold defaultstate="collapsed" desc="Attributes">
@@ -55,6 +61,7 @@ public final class PluginManagerImpl implements PluginManager {
     private Logger log = LoggerFactory.getLogger(PluginManagerImpl.class);
 
     private String pluginsXMLPath;
+
 
     // </editor-fold>
 
@@ -135,7 +142,7 @@ public final class PluginManagerImpl implements PluginManager {
             Plugin plugin = pluginRegistry.get(pluginId);
             if (plugin == null) {
                 try {
-                    plugin = (Plugin) pluginInfo.getClazz().newInstance();
+                    plugin = (Plugin)pluginInfo.getClazz().newInstance();
                     plugin.init(contextRegistry.get(pluginInfo.getType()));
                 } catch (InstantiationException e) {
                     e.printStackTrace();
@@ -272,7 +279,7 @@ public final class PluginManagerImpl implements PluginManager {
             PluginInfo pluginInfo = pluginInfoRegistry.get(pluginId);
             if (pluginInfo != null) {
                 try {
-                    plugin = (Plugin) pluginInfo.getClazz().newInstance();
+                    plugin = (Plugin)pluginInfo.getClazz().newInstance();
                 } catch (InstantiationException e) {
                     e.printStackTrace();
                 } catch (IllegalAccessException e) {
@@ -320,18 +327,44 @@ public final class PluginManagerImpl implements PluginManager {
 
         try {
 
-            File file = new File(this.pluginsXMLPath);
-            JAXBContext jaxbContext = JAXBContext.newInstance(PluginRegistry.class);
-            Unmarshaller jaxbUnmarshaller = jaxbContext.createUnmarshaller();
+            File pluginStates = new File(this.pluginsXMLPath);
+            if (!pluginStates.exists()) {
+                initPluginStateFile();
+                pluginRegistry = new PluginRegistry();
+            } else {
+                JAXBContext jaxbContext = JAXBContext.newInstance(PluginRegistry.class);
+                Unmarshaller jaxbUnmarshaller = jaxbContext.createUnmarshaller();
 
-            pluginRegistry = (PluginRegistry)jaxbUnmarshaller.unmarshal(file);
+                pluginRegistry = (PluginRegistry)jaxbUnmarshaller.unmarshal(pluginStates);
+            }
 
         } catch (JAXBException jbe) {
+            //TODO: Ask if load fail for a corrupt file what to do?
             log.error("Error converting loading xml file");
             jbe.printStackTrace();
         }
 
         return pluginRegistry.getPluginRegistry();
+    }
+
+    private void initPluginStateFile() {
+        try {
+
+            File pluginStates = new File(this.pluginsXMLPath);
+            if (!pluginStates.exists()) {
+                JAXBContext jaxbContext = JAXBContext.newInstance(PluginRegistry.class);
+                Marshaller jaxbMarshaller = jaxbContext.createMarshaller();
+                jaxbMarshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
+
+                PluginRegistry emptyRegistry = new PluginRegistry();
+
+                jaxbMarshaller.marshal(emptyRegistry, pluginStates);
+            }
+        } catch (PropertyException e) {
+            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+        } catch (JAXBException e) {
+            e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+        }
     }
 
     private void loadFolders(final List<String> pluginFolders) throws PluginException {
@@ -344,32 +377,35 @@ public final class PluginManagerImpl implements PluginManager {
                 String[] carFiles = f.list(new FilenameFilter() {
                     @Override
                     public boolean accept(final File dir, final String name) {
-                        return name.endsWith(".car");
+                        return name.endsWith(".jar");
                     }
                 });
 
-                for (String carFilePath : carFiles) {
-                    JarFile carFile = new JarFile(carFilePath);
-                    PluginInfo pluginInfo = pluginInfoFromManifest(carFile.getManifest());
-                    pluginInfo.setFolder(folder);
-                    String pluginId = String.format("%s.%s", pluginInfo.getName(),
-                        pluginInfo.getVersion());
-                    pluginInfo.setId(pluginId);
-                    PluginState pluginState = pluginStatesRegistry.get(pluginId);
-                    if(pluginState == null) {
-                        pluginState = PluginState.DISABLED;
+                if (carFiles != null) {
+
+                    for (String carFilePath : carFiles) {
+                        //TODO Check path separator
+                        JarFile carFile = new JarFile(String.format("%s/%s", folder, carFilePath));
+                        PluginInfo pluginInfo = pluginInfoFromManifest(carFile.getManifest());
+                        pluginInfo.setFolder(folder);
+                        String pluginId = String.format("%s.%s", pluginInfo.getName(), pluginInfo.getVersion());
+                        pluginInfo.setId(pluginId);
+                        PluginState pluginState = pluginStatesRegistry.get(pluginId);
+                        if (pluginState == null) {
+                            pluginState = PluginState.DISABLED;
+                        }
+                        Plugin pluginInstance = (Plugin)pluginInfo.getClazz().newInstance();
+                        if (pluginState == PluginState.ENABLED_INACTIVE) {
+                            pluginInstance.init(this.contextRegistry.get(pluginInfo.getType()));
+                            //TODO: Check if active it's needed
+                        }
+                        if (pluginState == PluginState.ENABLED_ACTIVE) {
+                            pluginInstance.init(this.contextRegistry.get(pluginInfo.getType()));
+                            pluginInstance.activate();
+                        }
+                        pluginInfoRegistry.put(pluginId, pluginInfo);
+                        pluginRegistry.put(pluginId, pluginInstance);
                     }
-                    Plugin pluginInstance = (Plugin) pluginInfo.getClazz().newInstance();
-                    if (pluginState == PluginState.ENABLED_INACTIVE) {
-                        pluginInstance.init(this.contextRegistry.get(pluginInfo.getType()));
-                        //TODO: Check if active it's needed
-                    }
-                    if (pluginState == PluginState.ENABLED_ACTIVE) {
-                        pluginInstance.init(this.contextRegistry.get(pluginInfo.getType()));
-                        pluginInstance.activate();
-                    }
-                    pluginInfoRegistry.put(pluginId, pluginInfo);
-                    pluginRegistry.put(pluginId, pluginInstance);
                 }
             }
             //Call to save plugins
@@ -392,7 +428,7 @@ public final class PluginManagerImpl implements PluginManager {
             for (String propertyFile : propertiesPath) {
                 properties.load(PluginManagerImpl.class.getClassLoader().getResourceAsStream(propertyFile));
             }
-            this.pluginsXMLPath = properties.getProperty(this.pluginsXMLPath);
+            this.pluginsXMLPath = properties.getProperty(PLUGIN_XML_PATH_KEY);
         } catch (IOException e) {
             log.debug("Error processing the properties map");
         } catch (NullPointerException e) {
@@ -419,6 +455,7 @@ public final class PluginManagerImpl implements PluginManager {
             pluginInfo.setType(attributes.getValue(ManifestFields.PLUGIN_TYPE));
             pluginInfo.setCompatibility(attributes.getValue(ManifestFields.PLUGIN_COMPATIBILITY));
             pluginInfo.setState(PluginManager.PluginState.DISABLED);
+            //TODO Set the Class for the given className
             pluginInfo.setClazz(Class.forName(attributes.getValue(ManifestFields.PLUGIN_CLASS_NAME)));
 
         } catch (ClassNotFoundException cnfe) {
@@ -428,9 +465,9 @@ public final class PluginManagerImpl implements PluginManager {
         return pluginInfo;
     }
 
-    private Map<String, PluginState> getPluginStatesMap(){
+    private Map<String, PluginState> getPluginStatesMap() {
         Map<String, PluginState> pluginStates = new HashMap<>();
-        for (String pluginId: pluginInfoRegistry.keySet()) {
+        for (String pluginId : pluginInfoRegistry.keySet()) {
             pluginStates.put(pluginId, pluginInfoRegistry.get(pluginId).getState());
         }
 
